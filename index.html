@@ -473,7 +473,16 @@ async function loadPlaylists() {
       `<li class="row"><span class="meta">No se encontraron playlists</span></li>`;
     $("playlists").querySelectorAll("li.clickable").forEach((li) =>
       li.addEventListener("click", () => loadPool(li.dataset.id, li.dataset.name)));
-  } catch (e) { toast("No pude cargar tus playlists (" + e.message + ")"); }
+  } catch (e) {
+    if (e.status === 403) {
+      $("playlists").innerHTML = `<li class="row"><div><b>Tu cuenta aún no tiene acceso.</b>
+        <div class="a" style="margin-top:4px">Segundo Aire está en modo de pruebas de Spotify
+        (máximo 5 corredores). Pídele al dueño de la app que agregue tu nombre y tu correo de
+        Spotify en su panel, y vuelve a intentar.</div></div></li>`;
+    } else {
+      toast("No pude cargar tus playlists (" + e.message + ")");
+    }
+  }
 }
 
 async function loadPool(playlistId, name) {
