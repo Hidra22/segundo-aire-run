@@ -95,14 +95,19 @@
   <!-- ── Setup / conexión ─────────────────────────────────────── -->
   <section class="screen" id="scr-setup">
     <div class="card">
-      <h2>1 · Conecta tu Spotify</h2>
-      <p class="note" style="margin-top:0">Necesitas <b>Spotify Premium</b> y una app gratuita de desarrollador:</p>
-      <p class="note">① Entra a <b>developer.spotify.com/dashboard</b> con tu cuenta de Spotify → <i>Create app</i>.<br>
-      ② En <i>Redirect URIs</i> pega exactamente:<br><code id="redirect-uri"></code><br>
-      ③ Marca <i>Web API</i>, guarda, y copia el <b>Client ID</b> aquí:</p>
-      <label for="client-id">Client ID</label>
-      <input type="text" id="client-id" placeholder="ej. 8a94c1f2d3…" autocomplete="off">
+      <h2>Conecta tu música</h2>
+      <p class="note" style="margin-top:0">Segundo Aire reproduce tu playlist en tu app de Spotify
+      de siempre, eligiendo cada canción según tu esfuerzo mientras corres.
+      Necesitas <b>Spotify Premium</b>.</p>
       <button class="primary wide" id="btn-login">Conectar Spotify</button>
+      <div id="dev-setup" hidden>
+        <p class="note" style="margin-top:16px">⚙️ <b>Configuración inicial</b> (solo el dueño de la app, una vez):<br>
+        ① <b>developer.spotify.com/dashboard</b> → <i>Create app</i> (marca <i>Web API</i>).<br>
+        ② En <i>Redirect URIs</i> pega exactamente: <code id="redirect-uri"></code><br>
+        ③ Copia aquí el <b>Client ID</b> que te da:</p>
+        <label for="client-id">Client ID</label>
+        <input type="text" id="client-id" placeholder="ej. 8a94c1f2d3…" autocomplete="off">
+      </div>
     </div>
   </section>
 
@@ -144,10 +149,16 @@
       <button class="wide" id="btn-bt" hidden>❤️ Conectar Fitbit Air (Bluetooth)</button>
       <p class="note" id="bt-note" hidden>En tu Fitbit: Google Health → Conexiones → Fitbit Air → <b>Compartir frecuencia cardíaca</b>. (Bluetooth web solo funciona en Chrome de Android o de compu; en iPhone la corrida va con GPS.)</p>
       <button class="primary wide" id="btn-start">▶ Iniciar corrida</button>
-      <p class="note">Antes de arrancar: abre Spotify en este teléfono y reproduce/pausa cualquier
-      canción una vez (activa el "dispositivo"). Durante la corrida deja esta página abierta y
-      la pantalla encendida — la música suena en la app de Spotify aunque cambies de app,
-      pero esta página necesita estar visible para ir eligiendo canciones.</p>
+      <p class="note">Durante la corrida, deja esta página visible y la pantalla encendida
+      (brazalete) — la música suena en tu app de Spotify, pero esta página es la que decide
+      qué canción sigue.</p>
+    </div>
+    <div class="card" id="device-help" hidden>
+      <h2>Un paso más</h2>
+      <p class="note" style="margin-top:0">Spotify todavía no aparece encendido en este teléfono.
+      Ve a tu app de <b>Spotify</b>, reproduce cualquier canción 2 segundos y ponle pausa.
+      Regresa aquí y dale:</p>
+      <button class="primary wide" id="btn-retry">Ya está — Reintentar</button>
     </div>
   </section>
 
@@ -243,16 +254,25 @@ const store = {
 
 // ════════════════════════════════════════════════════════════════════
 // Auth Spotify (Authorization Code + PKCE, sin secreto: apto para sitio estático)
+// El Client ID se fija aquí al desplegar; el usuario final solo ve "Conectar Spotify".
+const BAKED_CLIENT_ID = "";
 const REDIRECT_URI = location.origin + location.pathname;
 const SCOPES = "playlist-read-private playlist-read-collaborative user-read-playback-state user-modify-playback-state";
 $("redirect-uri").textContent = REDIRECT_URI;
+function currentClientId() {
+  return BAKED_CLIENT_ID || ($("client-id").value || "").trim() || store.get("client_id", "");
+}
 
 function b64url(buf) {
   return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 async function login() {
-  const clientId = $("client-id").value.trim();
-  if (!clientId) { toast("Pega tu Client ID de developer.spotify.com"); return; }
+  const clientId = currentClientId();
+  if (!clientId) {
+    $("dev-setup").hidden = false;
+    toast("Falta la configuración inicial de la app (ver abajo)");
+    return;
+  }
   store.set("client_id", clientId);
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(48)));
   store.set("verifier", verifier);
@@ -281,7 +301,7 @@ async function handleCallback() {
   history.replaceState({}, "", REDIRECT_URI);
   try {
     await tokenRequest({ grant_type: "authorization_code", code, redirect_uri: REDIRECT_URI,
-      client_id: store.get("client_id"), code_verifier: store.get("verifier") });
+      client_id: currentClientId(), code_verifier: store.get("verifier") });
     return true;
   } catch { toast("Falló la conexión con Spotify; intenta de nuevo"); return false; }
 }
@@ -290,7 +310,7 @@ async function ensureToken() {
   if (!t || !t.refresh) return null;
   if (Date.now() < t.exp) return t.access;
   try {
-    await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh, client_id: store.get("client_id") });
+    await tokenRequest({ grant_type: "refresh_token", refresh_token: t.refresh, client_id: currentClientId() });
     return store.get("tokens").access;
   } catch { return null; }
 }
@@ -605,9 +625,11 @@ async function startRun() {
     device = devs.devices.find((d) => d.is_active) || devs.devices.find((d) => d.type === "Smartphone") || devs.devices[0];
   } catch (e) { toast("No pude consultar tus dispositivos de Spotify"); return; }
   if (!device) {
-    toast("Abre Spotify, reproduce y pausa cualquier canción, y vuelve a intentar", 6000);
+    $("device-help").hidden = false;
+    $("device-help").scrollIntoView({ behavior: "smooth" });
     return;
   }
+  $("device-help").hidden = true;
   run.on = true; run.paused = false; run.t = 0; run.bias = 0; run.kicked = false;
   run.samples = []; run.songs = []; run.queuedFor = null; run.currentId = null;
   playedIDs = []; smoothed = 0.3;
@@ -753,6 +775,7 @@ $("btn-login").addEventListener("click", login);
 $("btn-logout").addEventListener("click", logout);
 $("btn-back-playlists").addEventListener("click", loadPlaylists);
 $("btn-start").addEventListener("click", startRun);
+$("btn-retry").addEventListener("click", startRun);
 $("btn-pause").addEventListener("click", togglePause);
 $("btn-end").addEventListener("click", () => { if (confirm("¿Terminar la corrida?")) endRun(); });
 $("btn-skip").addEventListener("click", skipSong);
@@ -768,7 +791,9 @@ if (navigator.bluetooth) {
 
 (async function init() {
   restoreCfg();
-  if ($("client-id")) $("client-id").value = store.get("client_id", "");
+  $("client-id").value = BAKED_CLIENT_ID ? "" : store.get("client_id", "");
+  // El bloque de configuración solo aparece si la app aún no tiene Client ID fijo.
+  if (!BAKED_CLIENT_ID && !store.get("client_id")) $("dev-setup").hidden = false;
   const cameBack = await handleCallback();
   if (cameBack || (await ensureToken())) loadPlaylists();
   else show("scr-setup");
